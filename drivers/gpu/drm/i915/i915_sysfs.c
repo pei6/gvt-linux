@@ -552,6 +552,78 @@ out:
 	return ret ?: ret_count;
 }
 
+static ssize_t gvt_state_read(struct file *filp, struct kobject *kobj,
+				struct bin_attribute *attr, char *usr_buf,
+				loff_t off, size_t count)
+{
+	int i, vm_idx;
+	ssize_t ret_count = 0;
+	static ssize_t total_count = 0;
+	cycles_t cur = get_cycles();
+	cycles_t start;
+	cycles_t idle_total_time = 0;
+	static char *buf = NULL;
+
+	if (!buf) {
+		buf = vzalloc(PAGE_SIZE);
+		if (!buf)
+			return 0;
+	}
+
+	if (off && total_count) {
+		ret_count = 0;
+		if (off < total_count) {
+			ret_count = total_count - off;
+			memcpy(usr_buf, &buf[off], total_count - off);
+		}
+		return ret_count;
+	}
+
+	total_count = 0;
+	gvt_state.cur_time = cur;
+	total_count += sprintf(&buf[total_count], "cur_time: %llx\n", gvt_state.cur_time);
+	total_count += sprintf(&buf[total_count], "eng   cmd#     idl#        idle cycles\n");
+	total_count += sprintf(&buf[total_count], "================host==================\n");
+	for (i = 0; i < GVT_STATE_ENGINES; i++) {
+		idle_total_time = gvt_state.host.engines[i].idle_total_time;
+		if (atomic_read(&gvt_state.host.engines[i].is_in_idle)) {
+			start = gvt_state.host.engines[i].idle_start;
+			idle_total_time += cur - start;
+		}
+
+		total_count += sprintf(&buf[total_count], "e%01d:%8lx#%8lx#%16llx\n",
+			i, gvt_state.host.engines[i].submit_count,
+			gvt_state.host.engines[i].idle_count,
+			idle_total_time);
+	}
+
+	for (vm_idx = 0; vm_idx < GVT_STATE_GPUS; vm_idx++) {
+		if (!gvt_state.vm[vm_idx].valid)
+			continue;
+
+		total_count += sprintf(&buf[total_count], "================vgpu%2d================\n", vm_idx);
+		for (i = 0; i < GVT_STATE_ENGINES; i++) {
+			idle_total_time = gvt_state.vm[vm_idx].engines[i].idle_total_time;
+			if (atomic_read(&gvt_state.vm[vm_idx].engines[i].is_in_idle)) {
+				start = gvt_state.vm[vm_idx].engines[i].idle_start;
+				idle_total_time += cur - start;
+			}
+
+			total_count += sprintf(&buf[total_count], "e%01d:%8lx#%8lx#%16llx\n",
+				i, gvt_state.vm[vm_idx].engines[i].submit_count,
+				gvt_state.vm[vm_idx].engines[i].idle_count,
+				idle_total_time);
+		}
+	}
+
+	ret_count = total_count;
+	if (count < ret_count)
+		ret_count = count;
+	memcpy(usr_buf, buf, ret_count);
+
+	return ret_count;
+}
+
 static ssize_t error_state_write(struct file *file, struct kobject *kobj,
 				 struct bin_attribute *attr, char *buf,
 				 loff_t off, size_t count)
@@ -565,6 +637,22 @@ static ssize_t error_state_write(struct file *file, struct kobject *kobj,
 	return count;
 }
 
+static ssize_t gvt_state_write (struct file *file, struct kobject *kobj,
+				 struct bin_attribute *attr, char *buf,
+				 loff_t off, size_t count)
+{
+	gvt_state_reset();
+	return count;
+}
+
+static struct bin_attribute gvt_state_attr = {
+	.attr.name = "gvt_state",
+	.attr.mode = S_IRUSR | S_IWUSR,
+	.size = 0,
+	.read = gvt_state_read,
+	.write = gvt_state_write,
+};
+
 static struct bin_attribute error_state_attr = {
 	.attr.name = "error",
 	.attr.mode = S_IRUSR | S_IWUSR,
@@ -575,7 +663,8 @@ static struct bin_attribute error_state_attr = {
 
 static void i915_setup_error_capture(struct device *kdev)
 {
-	if (sysfs_create_bin_file(&kdev->kobj, &error_state_attr))
+	if (sysfs_create_bin_file(&kdev->kobj, &error_state_attr) ||
+		sysfs_create_bin_file(&kdev->kobj, &gvt_state_attr))
 		DRM_ERROR("error_state sysfs setup failed\n");
 }
 

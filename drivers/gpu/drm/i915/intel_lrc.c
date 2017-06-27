@@ -410,6 +410,16 @@ static void execlists_submit_ports(struct intel_engine_cs *engine)
 	writel(upper_32_bits(desc[0]), elsp);
 	/* The context is automatically loaded after the following */
 	writel(lower_32_bits(desc[0]), elsp);
+
+	gvt_state.host.engines[engine->id].submit_count += (port[1].count ? 2 : 1);
+	/* stop idle time computing if new command is sumitted to ELSP ports */
+	if (atomic_read(&gvt_state.host.engines[engine->id].is_in_idle)) {
+		cycles_t cur = get_cycles();
+
+		atomic_set(&gvt_state.host.engines[engine->id].is_in_idle, false);
+		gvt_state.host.engines[engine->id].idle_total_time +=
+			cur - gvt_state.host.engines[engine->id].idle_start;
+	}
 }
 
 static bool ctx_single_port_submission(const struct i915_gem_context *ctx)
@@ -584,6 +594,7 @@ static void intel_lrc_irq_handler(unsigned long data)
 		u32 __iomem *buf =
 			dev_priv->regs + i915_mmio_reg_offset(RING_CONTEXT_STATUS_BUF_LO(engine, 0));
 		unsigned int csb, head, tail;
+		cycles_t cur = get_cycles();
 
 		csb = readl(csb_mmio);
 		head = GEN8_CSB_READ_PTR(csb);
@@ -612,6 +623,12 @@ static void intel_lrc_irq_handler(unsigned long data)
 
 			GEM_BUG_ON(port[0].count == 0 &&
 				   !(status & GEN8_CTX_STATUS_ACTIVE_IDLE));
+			if (port[0].count == 0) {
+				/* if port[0].count equals 0, means the HW engine is completly idle at this time. */
+				gvt_state.host.engines[engine->id].idle_start = cur;
+				gvt_state.host.engines[engine->id].idle_count++;
+				atomic_set(&gvt_state.host.engines[engine->id].is_in_idle, true);
+			}
 		}
 
 		writel(_MASKED_FIELD(GEN8_CSB_READ_PTR_MASK,

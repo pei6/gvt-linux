@@ -233,6 +233,7 @@ void intel_gvt_destroy_vgpu(struct intel_vgpu *vgpu)
 	mutex_lock(&gvt->lock);
 
 	WARN(vgpu->active, "vGPU is still active!\n");
+	gvt_state.vm[vgpu->id].valid = false;
 
 	idr_remove(&gvt->vgpu_idr, vgpu->id);
 	intel_vgpu_clean_sched_policy(vgpu);
@@ -367,6 +368,9 @@ struct intel_vgpu *intel_gvt_create_vgpu(struct intel_gvt *gvt,
 	vgpu = __intel_gvt_create_vgpu(gvt, &param);
 	if (IS_ERR(vgpu))
 		return vgpu;
+
+	gvt_state.vm[vgpu->id].valid = true;
+	gpu_state_reset(&gvt_state.vm[vgpu->id]);
 
 	/* calculate left instance change for types */
 	intel_gvt_update_vgpu_types(gvt);

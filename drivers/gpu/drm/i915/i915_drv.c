@@ -1186,6 +1186,35 @@ static void i915_driver_unregister(struct drm_i915_private *dev_priv)
 	i915_gem_shrinker_cleanup(dev_priv);
 }
 
+struct gvt_idle_state gvt_state;
+void gpu_state_reset(struct gpu_idle_state* gpu_state)
+{
+	int i;
+	bool valid;
+	cycles_t cur = get_cycles();
+
+	if (unlikely((gpu_state == NULL)))
+		return;
+
+	/* Keep valid state. The caller should do the correct setting. */
+	valid = gpu_state->valid;
+	memset(gpu_state, 0, sizeof(struct gpu_idle_state));
+	gpu_state->valid = valid;
+	for (i = 0; i < GVT_STATE_ENGINES; i++) {
+		gpu_state->engines[i].idle_start = cur;
+		atomic_set(&gpu_state->engines[i].is_in_idle, true);
+	}
+}
+
+void gvt_state_reset(void)
+{
+	int i;
+
+	gpu_state_reset(&gvt_state.host);
+	for (i = 0; i < GVT_STATE_GPUS; i++)
+		gpu_state_reset(&gvt_state.vm[i]);
+}
+
 /**
  * i915_driver_load - setup chip and create an initial config
  * @pdev: PCI device
@@ -1202,6 +1231,7 @@ int i915_driver_load(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct drm_i915_private *dev_priv;
 	int ret;
 
+	gvt_state_reset();
 	if (i915.nuclear_pageflip)
 		driver.driver_features |= DRIVER_ATOMIC;
 

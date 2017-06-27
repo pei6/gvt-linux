@@ -141,7 +141,9 @@ static int shadow_context_status_change(struct notifier_block *nb,
 	struct intel_gvt_workload_scheduler *scheduler = &gvt->scheduler;
 	enum intel_engine_id ring_id = req->engine->id;
 	struct intel_vgpu_workload *workload;
-
+	struct engine_idle_state *engine_state;
+	cycles_t cur = get_cycles();
+	
 	if (!is_gvt_request(req)) {
 		spin_lock_bh(&scheduler->mmio_context_lock);
 		if (action == INTEL_CONTEXT_SCHEDULE_IN &&
@@ -160,6 +162,7 @@ static int shadow_context_status_change(struct notifier_block *nb,
 	if (unlikely(!workload))
 		return NOTIFY_OK;
 
+	engine_state = &gvt_state.vm[workload->vgpu->id].engines[ring_id];
 	switch (action) {
 	case INTEL_CONTEXT_SCHEDULE_IN:
 		spin_lock_bh(&scheduler->mmio_context_lock);
@@ -173,6 +176,18 @@ static int shadow_context_status_change(struct notifier_block *nb,
 				      ring_id, workload->vgpu->id);
 		spin_unlock_bh(&scheduler->mmio_context_lock);
 		atomic_set(&workload->shadow_ctx_active, 1);
+
+		/* vgpu idle state */
+		{
+			engine_state->submit_count++;
+			engine_state->submit_unfinished++;
+			if (atomic_read(&engine_state->is_in_idle)) {
+				engine_state->idle_total_time += cur - engine_state->idle_start;
+				engine_state->idle_start = cur;
+				atomic_set(&engine_state->is_in_idle, false);
+			}
+		}
+
 		break;
 	case INTEL_CONTEXT_SCHEDULE_OUT:
 		/* If the status is -EINPROGRESS means this workload
@@ -185,6 +200,15 @@ static int shadow_context_status_change(struct notifier_block *nb,
 		if (workload->status == -EINPROGRESS)
 			workload->status = 0;
 		atomic_set(&workload->shadow_ctx_active, 0);
+
+		/* vgpu idle state */
+		{
+			engine_state->submit_unfinished--;
+			if (engine_state->submit_unfinished == 0) {
+				engine_state->idle_start = cur;
+				atomic_set(&engine_state->is_in_idle, true);
+			}
+		}
 		break;
 	default:
 		WARN_ON(1);

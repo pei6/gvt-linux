@@ -122,6 +122,19 @@ static void failsafe_emulate_mmio_rw(struct intel_vgpu *vgpu, uint64_t pa,
 int intel_vgpu_emulate_mmio_read(struct intel_vgpu *vgpu, uint64_t pa,
 		void *p_data, unsigned int bytes)
 {
+	int ret;
+	cycles_t cur;
+
+	gvt_state.vm[vgpu->id].vgpu_read_trap_count++;
+	cur = get_cycles();
+	ret = intel_vgpu_emulate_mmio_read_locked(vgpu, pa, p_data, bytes);
+	gvt_state.vm[vgpu->id].vgpu_read_trap_time += get_cycles() - cur;
+	return ret;
+}
+
+int intel_vgpu_emulate_mmio_read_locked(struct intel_vgpu *vgpu, uint64_t pa,
+		void *p_data, unsigned int bytes)
+{
 	struct intel_gvt *gvt = vgpu->gvt;
 	struct intel_gvt_mmio_info *mmio;
 	unsigned int offset = 0;
@@ -236,6 +249,19 @@ err:
  * Zero on success, negative error code if failed
  */
 int intel_vgpu_emulate_mmio_write(struct intel_vgpu *vgpu, uint64_t pa,
+		void *p_data, unsigned int bytes)
+{
+	int ret;
+	cycles_t cur;
+
+	gvt_state.vm[vgpu->id].vgpu_write_trap_count++;
+	cur = get_cycles();
+	ret = intel_vgpu_emulate_mmio_write_locked(vgpu, pa, p_data, bytes);
+	gvt_state.vm[vgpu->id].vgpu_write_trap_time += get_cycles() - cur;
+	return ret;
+}
+
+int intel_vgpu_emulate_mmio_write_locked(struct intel_vgpu *vgpu, uint64_t pa,
 		void *p_data, unsigned int bytes)
 {
 	struct intel_gvt *gvt = vgpu->gvt;

@@ -2055,6 +2055,38 @@ struct i915_oa_ops {
 	bool (*oa_buffer_is_empty)(struct drm_i915_private *dev_priv);
 };
 
+#define GVT_STATE_ENGINES 5
+#define GVT_STATE_GPUS 15
+struct engine_idle_state {
+	atomic_t is_in_idle; /* initialized as true */
+	cycles_t idle_start; /* initialized to the driver load time*/
+	cycles_t idle_total_time;
+	unsigned long submit_count;
+	unsigned long submit_unfinished;
+	unsigned long idle_count;
+};
+
+struct gpu_idle_state {
+	bool valid; /* always valid for host */
+	struct engine_idle_state engines[GVT_STATE_ENGINES];
+
+	/* for VM with vGPU only*/
+	unsigned long vgpu_read_trap_count;
+	cycles_t vgpu_read_trap_time;
+	unsigned long vgpu_write_trap_count;
+	cycles_t vgpu_write_trap_time;
+};
+
+struct gvt_idle_state {
+	cycles_t cur_time;
+	struct gpu_idle_state host;
+	struct gpu_idle_state vm[GVT_STATE_GPUS]; /* support maximum 15 vGPU instances */
+};
+
+extern struct gvt_idle_state gvt_state;
+void gpu_state_reset(struct gpu_idle_state* gpu_state);
+void gvt_state_reset(void);
+
 struct drm_i915_private {
 	struct drm_device drm;
 
